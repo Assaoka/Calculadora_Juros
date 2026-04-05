@@ -77,8 +77,12 @@ if True:
     
     transition_dates = []
     resumo_periodos = []
+    simulacao_interrompida = False
     
     for idx, p in enumerate(period_data):
+        if simulacao_interrompida:
+            break
+            
         inicio_aplicado = current_aplicado
         inicio_total = current_total
         
@@ -87,9 +91,20 @@ if True:
         
         for _ in range(meses_no_periodo):
             current_date += pd.DateOffset(months=1)
-            current_total = current_total * (1 + taxa_mensal) + p["aporte_mensal"]
-            current_aplicado = current_aplicado + p["aporte_mensal"]
             
+            # Cálculo do próximo valor
+            novo_total = current_total * (1 + taxa_mensal) + p["aporte_mensal"]
+            current_aplicado += p["aporte_mensal"]
+            
+            if novo_total <= 0:
+                current_total = 0
+                datas.append(current_date)
+                valor_total_lista.append(current_total)
+                valor_aplicado_lista.append(current_aplicado)
+                simulacao_interrompida = True
+                break
+                
+            current_total = novo_total
             datas.append(current_date)
             valor_total_lista.append(current_total)
             valor_aplicado_lista.append(current_aplicado)
@@ -101,6 +116,7 @@ if True:
             "Rendimento do Período": (current_total - inicio_total) - (current_aplicado - inicio_aplicado),
             "Evolução Total (Período)": current_total - inicio_total
         })
+
             
     df = pd.DataFrame({
         "Data": datas,
@@ -109,7 +125,11 @@ if True:
     })
 
     
+    if simulacao_interrompida:
+        st.warning("⚠️ **A simulação foi interrompida antecipadamente:** O montante acumulado chegou a zero devido a resgates superiores ao saldo disponível.")
+    
     st.divider()
+
     
     df_melt = df.melt(id_vars=["Data"], value_vars=["Valor Aplicado", "Valor Total"], 
                       var_name="Tipo", value_name="Valor (RS)")
