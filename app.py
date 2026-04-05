@@ -18,11 +18,13 @@ def remove_period(period_id):
 st.html("<h1 align='center'> Calculadora de Juros Compostos </h1>")
 
 with st.expander("Parâmetros", expanded=True):
-    col_init1, col_init2 = st.columns(2)
+    col_init1, col_init2, col_init3 = st.columns(3)
     with col_init1:
         aporte_inicial = st.number_input("Aporte Inicial (R$)", min_value=0.0, value=21000.0, step=100.0)
     with col_init2:
         data_inicial = st.date_input("Data Inicial", value="today")
+    with col_init3:
+        taxa_inflacao = st.number_input("Inflação Anual Média (%)", min_value=0.0, value=4.5, step=0.1)
 
     st.divider()
 
@@ -66,14 +68,17 @@ if True:
     datas = []
     valor_total_lista = []
     valor_aplicado_lista = []
+    valor_reajustado_lista = []
     
     current_total = aporte_inicial
     current_aplicado = aporte_inicial
+    current_reajustado = aporte_inicial
     current_date = pd.to_datetime(data_inicial)
     
     datas.append(current_date)
     valor_total_lista.append(current_total)
     valor_aplicado_lista.append(current_aplicado)
+    valor_reajustado_lista.append(current_reajustado)
     
     transition_dates = []
     resumo_periodos = []
@@ -88,6 +93,7 @@ if True:
         
         meses_no_periodo = p["meses"]
         taxa_mensal = (1 + p["taxa_anual"] / 100) ** (1 / 12) - 1
+        taxa_inflacao_mensal = (1 + taxa_inflacao / 100) ** (1 / 12) - 1
         
         for _ in range(meses_no_periodo):
             current_date += pd.DateOffset(months=1)
@@ -96,11 +102,16 @@ if True:
             novo_total = current_total * (1 + taxa_mensal) + p["aporte_mensal"]
             current_aplicado += p["aporte_mensal"]
             
+            # Cálculo do valor reajustado (poder de compra hoje)
+            meses_decorridos = len(valor_total_lista)
+            valor_reajustado = novo_total / ((1 + taxa_inflacao_mensal) ** meses_decorridos)
+            
             if novo_total <= 0:
                 current_total = 0
                 datas.append(current_date)
                 valor_total_lista.append(current_total)
                 valor_aplicado_lista.append(current_aplicado)
+                valor_reajustado_lista.append(0)
                 simulacao_interrompida = True
                 break
                 
@@ -108,11 +119,12 @@ if True:
             datas.append(current_date)
             valor_total_lista.append(current_total)
             valor_aplicado_lista.append(current_aplicado)
+            valor_reajustado_lista.append(valor_reajustado)
             
         transition_dates.append(current_date)
         resumo_periodos.append({
             "Período": f"Período {idx + 1}",
-            "Total Aplicado": current_aplicado - inicio_aplicado,
+            "Total Investido": current_aplicado - inicio_aplicado,
             "Rendimento do Período": (current_total - inicio_total) - (current_aplicado - inicio_aplicado),
             "Evolução Total (Período)": current_total - inicio_total
         })
@@ -120,8 +132,9 @@ if True:
             
     df = pd.DataFrame({
         "Data": datas,
-        "Valor Aplicado": valor_aplicado_lista,
-        "Valor Total": valor_total_lista
+        "Valor Investido": valor_aplicado_lista,
+        "Patrimônio Bruto (Nominal)": valor_total_lista,
+        "Poder de Compra (Real)": valor_reajustado_lista
     })
 
     
@@ -131,13 +144,17 @@ if True:
     st.divider()
 
     
-    df_melt = df.melt(id_vars=["Data"], value_vars=["Valor Aplicado", "Valor Total"], 
+    df_melt = df.melt(id_vars=["Data"], value_vars=["Valor Investido", "Patrimônio Bruto (Nominal)", "Poder de Compra (Real)"], 
                       var_name="Tipo", value_name="Valor (RS)")
     
     fig = px.line(df_melt, x="Data", y="Valor (RS)", color="Tipo",
-                  title="Valor Aplicado vs Valor Total com Juros Compostos",
+                  title="Evolução do Patrimônio (Nominal vs Real)",
                   labels={"Valor (RS)": "Montante (R$)", "Data": "Data do Aporte"},
-                  color_discrete_map={"Valor Aplicado": "#909090", "Valor Total": "#27ae60"})
+                  color_discrete_map={
+                      "Valor Investido": "#909090", 
+                      "Patrimônio Bruto (Nominal)": "#27ae60",
+                      "Poder de Compra (Real)": "#f39c12"
+                  })
     
     # Adicionando linhas tracejadas nas transições (exceto a última se não for relevante)
     for t_date in transition_dates[:-1]:
@@ -145,7 +162,7 @@ if True:
         
     # Adicionando marcadores nas transições nos valores exatos
     transition_df = df[df["Data"].isin(transition_dates)]
-    fig.add_scatter(x=transition_df["Data"], y=transition_df["Valor Total"], mode="markers", 
+    fig.add_scatter(x=transition_df["Data"], y=transition_df["Patrimônio Bruto (Nominal)"], mode="markers", 
                     marker=dict(color="#e74c3c", size=8), name="Transição / Fim de Período")
     
     fig.update_layout(hovermode="x unified", legend_title_text="")
@@ -159,17 +176,26 @@ if True:
         
     # Métricas globais
     lucro_total = current_total - current_aplicado
+    valor_final_reajustado = valor_reajustado_lista[-1]
+    perda_inflacionaria = current_total - valor_final_reajustado
+    
     with cols[0].container(border=True):
-        st.metric("Total Aplicado", format_br(current_aplicado))
+        st.metric("Total Investido", format_br(current_aplicado))
         st.divider()
-        st.metric("Rendimento Total", format_br(lucro_total))
-        st.divider()
+        #st.metric("Rendimento Total", format_br(lucro_total))
+        #st.divider()
         st.metric("Total Acumulado Final", format_br(current_total))
+        st.divider()
+        st.metric("Poder de Compra (Hoje)", format_br(valor_final_reajustado), 
+                  help="Este é o valor que o montante final teria nos dias de hoje, descontada a inflação.")
+        #st.divider()
+        #st.metric("Perda p/ Inflação", f"-{format_br(perda_inflacionaria)}", delta_color="inverse",
+                  #help="Quanto do seu rendimento 'desapareceu' por conta da desvalorização da moeda.")
         
     # Tabela com resumo por período
     st.markdown("#### Detalhamento de Performance por Período:")
     df_resumo = pd.DataFrame(resumo_periodos)
-    for col in ["Total Aplicado", "Rendimento do Período", "Evolução Total (Período)"]:
+    for col in ["Total Investido", "Rendimento do Período", "Evolução Total (Período)"]:
         df_resumo[col] = df_resumo[col].apply(format_br)
     
     st.dataframe(df_resumo, use_container_width=True, hide_index=True)
